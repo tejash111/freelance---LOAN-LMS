@@ -11,7 +11,7 @@ const UserVerification = () => {
   const [timer, setTimer] = useState(3);
   const [userActive, setUserActive] = useState(); // Simulating Firebase user.status
   const router = useRouter()
-  console.log(auth.currentUser?.uid || "No user logged in yet");
+  const [user,setUser]=useState(null)
   
 
   useEffect(() => {
@@ -20,6 +20,8 @@ const UserVerification = () => {
         console.log("✅ User logged in:", firebaseUser.uid);
         setUser(firebaseUser);
         checkUserStatus(firebaseUser.uid);
+        console.log(firebaseUser.uid);
+        
       } else {
         console.log("❌ No user logged in");
         setUser(null);
@@ -110,6 +112,7 @@ const UserVerification = () => {
   };
 
   return (
+    
     <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center p-6">
       <div className="max-w-md w-full">
         {/* Progress Steps */}

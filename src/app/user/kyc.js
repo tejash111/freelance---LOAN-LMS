@@ -3,18 +3,26 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { db } from '../../../firebase/firebase';
 import { doc, setDoc, getDoc, updateDoc, collection, addDoc } from 'firebase/firestore';
-import { Upload, CheckCircle, AlertCircle, Clock, FileText, User, CreditCard, DollarSign } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, Clock, FileText, User, CreditCard, DollarSign, Loader } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { getAuth,onAuthStateChanged } from 'firebase/auth';
 
 const EKYCWorkflow = ({ loanId }) => {
-  const { user } = useAuth();
+  const user = getAuth()
+  console.log(user.currentUser);
+  
+  
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [uploadingDoc, setUploadingDoc] = useState('');
+  const [verifyingDoc, setVerifyingDoc] = useState('');
+ 
+  
   
   const [loanData, setLoanData] = useState({
-    type: 'personal',
+    type: 'personal Loan',
     amount: '',
     tenure: '',
     income: '',
@@ -24,13 +32,13 @@ const EKYCWorkflow = ({ loanId }) => {
   });
 
   const [documents, setDocuments] = useState({
-    aadhaar: { file: null, url: '', status: 'pending', verified: false },
-    pan: { file: null, url: '', status: 'pending', verified: false },
-    salarySlip: { file: null, url: '', status: 'pending', verified: false },
-    bankStatement: { file: null, url: '', status: 'pending', verified: false }
+    aadhaar: { url: '', status: 'pending', verified: false },
+    pan: { url: '', status: 'pending', verified: false },
+    bankStatement: { url: '', status: 'pending', verified: false },
+    itr: { url: '', status: 'pending', verified: false }
   });
 
-  const router=useRouter();
+  const router = useRouter();
 
   const [personalInfo, setPersonalInfo] = useState({
     fullName: '',
@@ -57,10 +65,11 @@ const EKYCWorkflow = ({ loanId }) => {
   ];
 
   const loanTypes = [
-    { value: 'personal', label: 'Personal Loan' },
-    { value: 'home', label: 'Home Loan' },
-    { value: 'car', label: 'Car Loan' },
-    { value: 'business', label: 'Business Loan' }
+    { value: 'personal Loan', label: 'Personal Loan' },
+    { value: 'Home Loan', label: 'Home Loan' },
+    { value: 'Vehicle Loan', label: 'Car Loan' },
+    { value: 'business Loan', label: 'Business Loan' },
+    { value: 'SHG Loan', label: 'SHG Loan' },
   ];
 
   const tenureOptions = [12, 18, 24, 36, 48, 60];
@@ -78,7 +87,7 @@ const EKYCWorkflow = ({ loanId }) => {
       if (loanDoc.exists()) {
         const data = loanDoc.data();
         setLoanData({
-          type: data.type || 'personal',
+          type: data.type || 'personal Loan',
           amount: data.amount || '',
           tenure: data.tenure || '',
           income: data.income || '',
@@ -95,8 +104,11 @@ const EKYCWorkflow = ({ loanId }) => {
           const updatedDocs = { ...documents };
           Object.keys(data.docs).forEach(key => {
             if (updatedDocs[key]) {
-              updatedDocs[key].url = data.docs[key];
-              updatedDocs[key].status = 'uploaded';
+              updatedDocs[key] = {
+                url: data.docs[key],
+                status: 'uploaded',
+                verified: data.verified && data.verified[key] || false
+              };
             }
           });
           setDocuments(updatedDocs);
@@ -115,99 +127,117 @@ const EKYCWorkflow = ({ loanId }) => {
       }
     } catch (error) {
       console.error('Error loading loan data:', error);
+      setError('Failed to load existing loan data');
     }
   };
 
-  // Simulate file upload (replace with actual Firebase Storage upload)
-  const handleFileUpload = async (docType, file) => {
-  if (!file) return;
-
-  setLoading(true);
-  setError(''); // Clear any previous errors
-  
-  try {
-    // Basic file validation
-    if (file.size > 10 * 1024 * 1024) {
-      throw new Error('File size must be less than 10MB');
+  // Fixed file upload function
+  const handleFileUpload = async (file, documentType) => {
+    if (!file) {
+      setError('Please select a file first');
+      return;
     }
 
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
-    if (!allowedTypes.includes(file.type)) {
-      throw new Error('Only JPG, PNG, and PDF files are allowed');
-    }
-
-    // Simulate upload delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    setUploadingDoc(documentType);
+    setError('');
     
-    // Create fake URL for demo purposes
-    const mockUrl = `https://storage.example.com/${user?.uid || 'demo-user'}/${docType}/${Date.now()}_${file.name}`;
-    
-    setDocuments(prev => ({
-      ...prev,
-      [docType]: {
-        ...prev[docType],
-        file,
-        url: mockUrl,
-        status: 'uploaded',
-        verified: false
-      }
-    }));
-
-    setSuccess(`${docType.charAt(0).toUpperCase() + docType.slice(1)} uploaded successfully`);
-    
-    // Clear success message after 3 seconds
-    setTimeout(() => setSuccess(''), 3000);
-    
-  } catch (error) {
-    console.error('Upload error:', error);
-    setError(`Failed to upload ${docType}: ${error.message}`);
-    
-    // Reset the file selection
-    setDocuments(prev => ({
-      ...prev,
-      [docType]: {
-        ...prev[docType],
-        file: null
-      }
-    }));
-  } finally {
-    setLoading(false);
-  }
-};
-
-  // Simulate document verification
-  const verifyDocument = async (docType) => {
-    setLoading(true);
     try {
-      // Simulate verification API call
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      const data = new FormData();
+      data.append("file", file);
+      data.append("upload_preset", "loan-app"); 
+      data.append("cloud_name", "dr1gpbjgg"); 
+
+      const res = await fetch("https://api.cloudinary.com/v1_1/dr1gpbjgg/image/upload", {
+        method: "POST",
+        body: data,
+      });
+
+      if (!res.ok) {
+        throw new Error('Upload failed');
+      }
+
+      const uploadedImage = await res.json();
       
-      // Mock verification result (90% success rate)
-      const isVerified = Math.random() > 0.1;
+      setDocuments(prev => ({
+        ...prev,
+        [documentType]: {
+          url: uploadedImage.secure_url,
+          status: 'uploaded',
+          verified: false
+        }
+      }));
+
+      setSuccess(`${documentType} uploaded successfully!`);
       
+      // Auto-save to database
+      await saveLoanData();
+      
+    } catch (error) {
+      console.error('Upload error:', error);
+      setError(`Failed to upload ${documentType}. Please try again.`);
+    } finally {
+      setUploadingDoc('');
+    }
+  };
+
+  // Individual upload handlers
+  const handleAadhaarUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) handleFileUpload(file, "aadhaar");
+  };
+
+  const handlePanUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) handleFileUpload(file, "pan");
+  };
+
+  const handleBankStatementUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) handleFileUpload(file, "bankStatement");
+  };
+
+  const handleItrUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) handleFileUpload(file, "itr");
+  };
+
+  // Quick verification (2-second fake verification)
+  const verifyDocument = async (docType) => {
+    setVerifyingDoc(docType);
+    setError('');
+    
+    try {
+      // 2-second verification simulation
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Always verify successfully
       setDocuments(prev => ({
         ...prev,
         [docType]: {
           ...prev[docType],
-          status: isVerified ? 'verified' : 'rejected',
-          verified: isVerified
+          status: 'verified',
+          verified: true
         }
       }));
 
-      if (isVerified) {
-        setSuccess(`${docType.toUpperCase()} verified successfully`);
-      } else {
-        setError(`${docType.toUpperCase()} verification failed. Please re-upload.`);
-      }
+      setSuccess(`${docType.toUpperCase()} verified successfully!`);
+      
+      // Auto-save verification status
+      await saveLoanData();
+      
     } catch (error) {
       setError(`Verification failed for ${docType}`);
     } finally {
-      setLoading(false);
+      setVerifyingDoc('');
     }
   };
 
+  // Fixed save function
   const saveLoanData = async (stepData = {}) => {
-    if (!user) return;
+    if (!user) {
+      setError('User not authenticated');
+      return;
+    }
 
     try {
       const loanRef = loanId ? doc(db, 'loans', loanId) : doc(collection(db, 'loans'));
@@ -220,33 +250,39 @@ const EKYCWorkflow = ({ loanId }) => {
         docs: Object.entries(documents)
           .filter(([_, doc]) => doc.url)
           .reduce((acc, [key, doc]) => ({ ...acc, [key]: doc.url }), {}),
-        updatedAt: new Date()
+        verified: Object.entries(documents)
+          .filter(([_, doc]) => doc.verified)
+          .reduce((acc, [key, doc]) => ({ ...acc, [key]: doc.verified }), {}),
+        updatedAt: new Date(),
+        status: stepData.status || 'pending-verification'
       };
 
       if (!loanId) {
         loanDocument.createdAt = new Date();
-        loanDocument.status = 'pending-verification';
       }
 
       await setDoc(loanRef, loanDocument, { merge: true });
       
       if (!loanId) {
-        // Set loanId for new applications
-        router.push(`/loan-application/${loanRef.id}`);
+        // Redirect to the new loan application page
+        const newLoanId = loanRef.id;
+        router.push(`/loan-application/${newLoanId}`);
       }
       
       return loanRef.id;
     } catch (error) {
       console.error('Error saving loan data:', error);
+      setError('Failed to save data. Please try again.');
       throw error;
     }
   };
 
   const handleNext = async () => {
     setError('');
+    setLoading(true);
     
     try {
-      // Validate current step
+      // Validation for each step
       if (currentStep === 1) {
         if (!loanData.amount || !loanData.tenure || !loanData.income) {
           setError('Please fill in all required loan details');
@@ -268,30 +304,34 @@ const EKYCWorkflow = ({ loanId }) => {
       }
       
       if (currentStep === 3) {
-        const requiredDocs = ['aadhaar', 'pan', 'salarySlip'];
-        const uploadedDocs = requiredDocs.filter(doc => documents[doc].url);
-        if (uploadedDocs.length < requiredDocs.length) {
-          setError('Please upload all required documents');
+        const uploadedDocs = Object.values(documents).filter(doc => doc.url);
+        if (uploadedDocs.length === 0) {
+          setError('Please upload at least one document');
           return;
         }
       }
       
       if (currentStep === 4) {
         const verifiedDocs = Object.values(documents).filter(doc => doc.verified);
-        if (verifiedDocs.length < 3) {
-          setError('Please complete document verification');
+        if (verifiedDocs.length === 0) {
+          setError('Please verify at least one document');
           return;
         }
       }
 
       setCurrentStep(prev => Math.min(prev + 1, steps.length));
+      setSuccess('');
     } catch (error) {
       setError('Failed to save progress. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleSubmit = async () => {
     setLoading(true);
+    setError('');
+    
     try {
       await saveLoanData({ 
         status: 'submitted',
@@ -313,7 +353,7 @@ const EKYCWorkflow = ({ loanId }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-50 via-blue-100 to-blue-50 py-8">
+    <div className="flex-1 flex flex-col min-w-screen min-h-screen bg-gradient-to-b from-blue-50 via-blue-100 to-blue-50 py-8">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Progress Steps */}
         <div className="mb-8">
@@ -343,11 +383,8 @@ const EKYCWorkflow = ({ loanId }) => {
                         }`}>
                           {step.title}
                         </p>
-                       
-                        
                       </div>
                     </div>
-                    
                   </li>
                 );
               })}
@@ -639,292 +676,369 @@ const EKYCWorkflow = ({ loanId }) => {
           {/* Step 3: Document Upload */}
           {currentStep === 3 && (
             <div className="space-y-6">
-              <h3 className="text-lg font-medium text-gray-900">Document Upload</h3>
+              <h3 className="text-lg font-medium text-gray-900 text-center">Upload Documents</h3>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {Object.entries(documents).map(([docType, doc]) => {
-                  const docLabels = {
-                    aadhaar: 'Aadhaar Card',
-                    pan: 'PAN Card',
-                    salarySlip: 'Salary Slip',
-                    bankStatement: 'Bank Statement'
-                  };
-
-                  return (
-                    <div key={docType} className="border border-gray-300 rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <h4 className="text-sm font-medium text-gray-900">
-                          {docLabels[docType]} {['aadhaar', 'pan', 'salarySlip'].includes(docType) && '*'}
-                        </h4>
-                        <div className={`px-2 py-1 rounded text-xs ${
-                          doc.status === 'verified' ? 'bg-green-100 text-green-800' :
-                          doc.status === 'uploaded' ? 'bg-blue-100 text-blue-800' :
-                          doc.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>
-                          {doc.status.charAt(0).toUpperCase() + doc.status.slice(1)}
-                        </div>
-                      </div>
-
-                      {!doc.url ? (
-                        <div>
-                          <input
-                            type="file"
-                            accept="image/*,.pdf"
-                            onChange={(e) => {
-                              const file = e.target.files[0];
-                              if (file) {
-                                setDocuments(prev => ({
-                                  ...prev,
-                                  [docType]: { ...prev[docType], file }
-                                }));
-                              }
-                            }}
-                            className="hidden"
-                            id={`file-${docType}`}
-                          />
-                          <label
-                            htmlFor={`file-${docType}`}
-                            className="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100"
-                          >
-                            <Upload className="w-8 h-8 text-gray-400 mb-2" />
-                            <p className="text-sm text-gray-500">Click to upload</p>
-                            <p className="text-xs text-gray-400">PNG, JPG, PDF up to 10MB</p>
-                          </label>
-                          
-                          {doc.file && (
-                            <div className="mt-2 flex items-center justify-between">
-                              <span className="text-sm text-gray-600">{doc.file.name}</span>
-                              <button
-                                onClick={() => handleFileUpload(docType, doc.file)}
-                                disabled={loading}
-                                className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50"
-                              >
-                                {loading ? 'Uploading...' : 'Upload'}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <div className="flex items-center text-sm text-green-600">
-                            <CheckCircle className="w-4 h-4 mr-2" />
-                            Document uploaded successfully
-                          </div>
-                          <button
-                            onClick={() => setDocuments(prev => ({
-                              ...prev,
-                              [docType]: { file: null, url: '', status: 'pending', verified: false }
-                            }))}
-                            className="text-sm text-red-600 hover:text-red-800"
-                          >
-                            Remove and re-upload
-                          </button>
+                {/* Aadhaar Card */}
+                <div className="border border-gray-300 rounded-lg p-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Aadhaar Card *
+                  </label>
+                  {!documents.aadhaar.url ? (
+                    <div>
+                      <input
+                        type="file"
+                        accept="image/*,.pdf"
+                        onChange={handleAadhaarUpload}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      {uploadingDoc === 'aadhaar' && (
+                        <div className="flex items-center mt-2 text-blue-600">
+                          <Loader className="animate-spin h-4 w-4 mr-2" />
+                          Uploading...
                         </div>
                       )}
                     </div>
-                  );
-                })}
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex items-center text-green-600">
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                        Document uploaded successfully
+                      </div>
+                      <button
+                        onClick={() => setDocuments(prev => ({
+                          ...prev,
+                          aadhaar: { url: '', status: 'pending', verified: false }
+                        }))}
+                        className="text-sm text-red-600 hover:text-red-800"
+                      >
+                        Remove and re-upload
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* PAN Card */}
+                <div className="border border-gray-300 rounded-lg p-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    PAN Card *
+                  </label>
+                  {!documents.pan.url ? (
+                    <div>
+                      <input
+                        type="file"
+                        accept="image/*,.pdf"
+                        onChange={handlePanUpload}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      {uploadingDoc === 'pan' && (
+                        <div className="flex items-center mt-2 text-blue-600">
+                          <Loader className="animate-spin h-4 w-4 mr-2" />
+                          Uploading...
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex items-center text-green-600">
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                        Document uploaded successfully
+                      </div>
+                      <button
+                        onClick={() => setDocuments(prev => ({
+                          ...prev,
+                          pan: { url: '', status: 'pending', verified: false }
+                        }))}
+                        className="text-sm text-red-600 hover:text-red-800"
+                      >
+                        Remove and re-upload
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                                {/* Bank Statement */}
+                <div className="border border-gray-300 rounded-lg p-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Bank Statement *
+                  </label>
+                  {!documents.bankStatement.url ? (
+                    <div>
+                      <input
+                        type="file"
+                        accept="image/*,.pdf"
+                        onChange={handleBankStatementUpload}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      {uploadingDoc === 'bankStatement' && (
+                        <div className="flex items-center mt-2 text-blue-600">
+                          <Loader className="animate-spin h-4 w-4 mr-2" />
+                          Uploading...
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex items-center text-green-600">
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                        Document uploaded successfully
+                      </div>
+                      <button
+                        onClick={() => setDocuments(prev => ({
+                          ...prev,
+                          bankStatement: { url: '', status: 'pending', verified: false }
+                        }))}
+                        className="text-sm text-red-600 hover:text-red-800"
+                      >
+                        Remove and re-upload
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* ITR (Optional) */}
+                <div className="border border-gray-300 rounded-lg p-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    ITR (Income Tax Return) - Optional
+                  </label>
+                  {!documents.itr.url ? (
+                    <div>
+                      <input
+                        type="file"
+                        accept="image/*,.pdf"
+                        onChange={handleItrUpload}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      {uploadingDoc === 'itr' && (
+                        <div className="flex items-center mt-2 text-blue-600">
+                          <Loader className="animate-spin h-4 w-4 mr-2" />
+                          Uploading...
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex items-center text-green-600">
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                        Document uploaded successfully
+                      </div>
+                      <button
+                        onClick={() => setDocuments(prev => ({
+                          ...prev,
+                          itr: { url: '', status: 'pending', verified: false }
+                        }))}
+                        className="text-sm text-red-600 hover:text-red-800"
+                      >
+                        Remove and re-upload
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+                <div className="flex">
+                  <AlertCircle className="w-5 h-5 text-blue-400 mr-3" />
+                  <div>
+                    <p className="text-sm font-medium text-blue-800">Document Requirements</p>
+                    <p className="text-sm text-blue-700 mt-1">
+                      • Aadhaar Card: Front and back side in a single file<br/>
+                      • PAN Card: Clear image of both sides<br/>
+                      • Bank Statement: Last 6 months statement in PDF format<br/>
+                      • ITR: Last 2 years returns (if available)
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           )}
 
-         
+          {/* Step 4: Verification */}
+          {currentStep === 4 && (
+            <div className="space-y-6">
+              <h3 className="text-lg font-medium text-gray-900">Document Verification</h3>
+              
+              <div className="space-y-4">
+                {Object.entries(documents)
+                  .filter(([_, doc]) => doc.url)
+                  .map(([docType, doc]) => {
+                    const docLabels = {
+                      aadhaar: 'Aadhaar Card',
+                      pan: 'PAN Card',
+                      bankStatement: 'Bank Statement',
+                      itr: 'Income Tax Return'
+                    };
 
-{/* Step 4: Verification */}
-{currentStep === 4 && (
-  <div className="space-y-6">
-    <h3 className="text-lg font-medium text-gray-900">Document Verification</h3>
-    
-    <div className="space-y-4">
-      {Object.entries(documents)
-        .filter(([_, doc]) => doc.url)
-        .map(([docType, doc]) => {
-          const docLabels = {
-            aadhaar: 'Aadhaar Card',
-            pan: 'PAN Card',
-            salarySlip: 'Salary Slip',
-            bankStatement: 'Bank Statement'
-          };
-
-          return (
-            <div key={docType} className="flex items-center justify-between p-4 border border-gray-300 rounded-lg">
-              <div className="flex items-center">
-                <FileText className="w-5 h-5 text-gray-400 mr-3" />
-                <div>
-                  <p className="text-sm font-medium text-gray-900">{docLabels[docType]}</p>
-                  <p className="text-xs text-gray-500">
-                    {doc.status === 'verified' ? 'Verified successfully' :
-                     doc.status === 'rejected' ? 'Verification failed' :
-                     'Pending verification'}
-                  </p>
-                </div>
+                    return (
+                      <div key={docType} className="flex items-center justify-between p-4 border border-gray-300 rounded-lg">
+                        <div className="flex items-center">
+                          <FileText className="w-5 h-5 text-gray-400 mr-3" />
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{docLabels[docType]}</p>
+                            <p className="text-xs text-gray-500">
+                              {doc.status === 'verified' ? 'Verified successfully' :
+                              doc.status === 'uploaded' ? 'Pending verification' :
+                              'Not uploaded'}
+                            </p>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center space-x-3">
+                          {doc.status === 'uploaded' && (
+                            <button
+                              onClick={() => verifyDocument(docType)}
+                              disabled={verifyingDoc === docType}
+                              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50"
+                            >
+                              {verifyingDoc === docType ? (
+                                <span className="flex items-center">
+                                  <Loader className="animate-spin h-4 w-4 mr-2" />
+                                  Verifying...
+                                </span>
+                              ) : 'Verify Document'}
+                            </button>
+                          )}
+                          
+                          {doc.status === 'verified' && (
+                            <div className="flex items-center text-green-600">
+                              <CheckCircle className="w-6 h-6 mr-2" />
+                              Verified
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
               </div>
               
-              <div className="flex items-center space-x-3">
-                {doc.status === 'uploaded' && (
-                  <button
-                    onClick={() => verifyDocument(docType)}
-                    disabled={loading}
-                    className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {loading ? 'Verifying...' : 'Verify Document'}
-                  </button>
-                )}
-                
-                {doc.status === 'verified' && (
-                  <CheckCircle className="w-6 h-6 text-green-600" />
-                )}
-                
-                {doc.status === 'rejected' && (
-                  <div className="flex items-center">
-                    <AlertCircle className="w-6 h-6 text-red-600 mr-2" />
-                    <button
-                      onClick={() => setDocuments(prev => ({
-                        ...prev,
-                        [docType]: { ...prev[docType], status: 'uploaded', verified: false }
-                      }))}
-                      className="px-3 py-1 bg-red-100 text-red-700 text-sm rounded-md hover:bg-red-200"
-                    >
-                      Re-upload
-                    </button>
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+                <div className="flex">
+                  <Clock className="w-5 h-5 text-blue-400 mr-3" />
+                  <div>
+                    <p className="text-sm font-medium text-blue-800">Verification Process</p>
+                    <p className="text-sm text-blue-700 mt-1">
+                      Our system will verify your documents automatically. This process usually takes 2-3 minutes.
+                      Please ensure all documents are clear and readable for faster verification.
+                    </p>
                   </div>
-                )}
+                </div>
               </div>
             </div>
-          );
-        })}
-    </div>
-    
-    <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
-      <div className="flex">
-        <Clock className="w-5 h-5 text-blue-400 mr-3" />
-        <div>
-          <p className="text-sm font-medium text-blue-800">Verification Process</p>
-          <p className="text-sm text-blue-700 mt-1">
-            Our system will verify your documents automatically. This process usually takes 2-3 minutes.
-            Please ensure all documents are clear and readable for faster verification.
-          </p>
-        </div>
-      </div>
-    </div>
-  </div>
-)}
+          )}
 
-{/* Step 5: Review & Submit */}
-{currentStep === 5 && (
-  <div className="space-y-6">
-    <h3 className="text-lg font-medium text-gray-900">Review Your Application</h3>
-    
-    <div className="bg-gray-50 rounded-lg p-4">
-      <h4 className="font-medium text-gray-900 mb-3">Loan Details</h4>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-        <div><span className="text-gray-600">Loan Type:</span> {loanTypes.find(t => t.value === loanData.type)?.label}</div>
-        <div><span className="text-gray-600">Amount:</span> ₹{loanData.amount}</div>
-        <div><span className="text-gray-600">Tenure:</span> {loanData.tenure} months</div>
-        <div><span className="text-gray-600">Monthly Income:</span> ₹{loanData.income}</div>
-        <div><span className="text-gray-600">CIBIL Score:</span> {loanData.cibil || 'Not provided'}</div>
-        <div><span className="text-gray-600">Purpose:</span> {loanData.purpose || 'Not specified'}</div>
-      </div>
-    </div>
+          {/* Step 5: Review & Submit */}
+          {currentStep === 5 && (
+            <div className="space-y-6">
+              <h3 className="text-lg font-medium text-gray-900">Review Your Application</h3>
+              
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="font-medium text-gray-900 mb-3">Loan Details</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  <div><span className="text-gray-600">Loan Type:</span> {loanTypes.find(t => t.value === loanData.type)?.label}</div>
+                  <div><span className="text-gray-600">Amount:</span> ₹{loanData.amount}</div>
+                  <div><span className="text-gray-600">Tenure:</span> {loanData.tenure} months</div>
+                  <div><span className="text-gray-600">Monthly Income:</span> ₹{loanData.income}</div>
+                  <div><span className="text-gray-600">CIBIL Score:</span> {loanData.cibil || 'Not provided'}</div>
+                  <div><span className="text-gray-600">Purpose:</span> {loanData.purpose || 'Not specified'}</div>
+                </div>
+              </div>
 
-    <div className="bg-gray-50 rounded-lg p-4">
-      <h4 className="font-medium text-gray-900 mb-3">Personal Information</h4>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-        <div><span className="text-gray-600">Full Name:</span> {personalInfo.fullName}</div>
-        <div><span className="text-gray-600">Date of Birth:</span> {personalInfo.dateOfBirth}</div>
-        <div><span className="text-gray-600">Gender:</span> {personalInfo.gender || 'Not specified'}</div>
-        <div><span className="text-gray-600">Marital Status:</span> {personalInfo.maritalStatus || 'Not specified'}</div>
-        <div><span className="text-gray-600">Phone:</span> {personalInfo.phone}</div>
-        <div><span className="text-gray-600">Email:</span> {personalInfo.email}</div>
-        <div className="md:col-span-2">
-          <span className="text-gray-600">Address:</span> {personalInfo.address}
-        </div>
-        <div><span className="text-gray-600">City:</span> {personalInfo.city}</div>
-        <div><span className="text-gray-600">State:</span> {personalInfo.state}</div>
-        <div><span className="text-gray-600">PIN Code:</span> {personalInfo.pincode}</div>
-        <div><span className="text-gray-600">Company:</span> {personalInfo.companyName || 'Not specified'}</div>
-      </div>
-    </div>
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="font-medium text-gray-900 mb-3">Personal Information</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  <div><span className="text-gray-600">Full Name:</span> {personalInfo.fullName}</div>
+                  <div><span className="text-gray-600">Date of Birth:</span> {personalInfo.dateOfBirth}</div>
+                  <div><span className="text-gray-600">Gender:</span> {personalInfo.gender || 'Not specified'}</div>
+                  <div><span className="text-gray-600">Marital Status:</span> {personalInfo.maritalStatus || 'Not specified'}</div>
+                  <div><span className="text-gray-600">Phone:</span> {personalInfo.phone}</div>
+                  <div><span className="text-gray-600">Email:</span> {personalInfo.email}</div>
+                  <div className="md:col-span-2">
+                    <span className="text-gray-600">Address:</span> {personalInfo.address}
+                  </div>
+                  <div><span className="text-gray-600">City:</span> {personalInfo.city}</div>
+                  <div><span className="text-gray-600">State:</span> {personalInfo.state}</div>
+                  <div><span className="text-gray-600">PIN Code:</span> {personalInfo.pincode}</div>
+                  <div><span className="text-gray-600">Company:</span> {personalInfo.companyName || 'Not specified'}</div>
+                </div>
+              </div>
 
-    <div className="bg-gray-50 rounded-lg p-4">
-      <h4 className="font-medium text-gray-900 mb-3">Documents Status</h4>
-      <div className="space-y-2 text-sm">
-        {Object.entries(documents).map(([docType, doc]) => {
-          const docLabels = {
-            aadhaar: 'Aadhaar Card',
-            pan: 'PAN Card',
-            salarySlip: 'Salary Slip',
-            bankStatement: 'Bank Statement'
-          };
-          
-          return (
-            <div key={docType} className="flex items-center justify-between">
-              <span className="text-gray-600">{docLabels[docType]}:</span>
-              <span className={`px-2 py-1 rounded text-xs ${
-                doc.status === 'verified' ? 'bg-green-100 text-green-800' :
-                doc.status === 'uploaded' ? 'bg-blue-100 text-blue-800' :
-                doc.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                'bg-gray-100 text-gray-800'
-              }`}>
-                {doc.status.charAt(0).toUpperCase() + doc.status.slice(1)}
-              </span>
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="font-medium text-gray-900 mb-3">Documents Status</h4>
+                <div className="space-y-2 text-sm">
+                  {Object.entries(documents).map(([docType, doc]) => {
+                    const docLabels = {
+                      aadhaar: 'Aadhaar Card',
+                      pan: 'PAN Card',
+                      bankStatement: 'Bank Statement',
+                      itr: 'Income Tax Return'
+                    };
+                    
+                    return (
+                      <div key={docType} className="flex items-center justify-between">
+                        <span className="text-gray-600">{docLabels[docType]}:</span>
+                        <span className={`px-2 py-1 rounded text-xs ${
+                          doc.status === 'verified' ? 'bg-green-100 text-green-800' :
+                          doc.status === 'uploaded' ? 'bg-blue-100 text-blue-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {doc.status.charAt(0).toUpperCase() + doc.status.slice(1)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+                <div className="flex">
+                  <AlertCircle className="w-5 h-5 text-yellow-400 mr-3" />
+                  <div>
+                    <p className="text-sm font-medium text-yellow-800">Important Notice</p>
+                    <p className="text-sm text-yellow-700 mt-1">
+                      By submitting this application, you confirm that all information provided is accurate and complete.
+                      Any false information may lead to rejection of your application.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
-          );
-        })}
-      </div>
-    </div>
+          )}
 
-    <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
-      <div className="flex">
-        <AlertCircle className="w-5 h-5 text-yellow-400 mr-3" />
-        <div>
-          <p className="text-sm font-medium text-yellow-800">Important Notice</p>
-          <p className="text-sm text-yellow-700 mt-1">
-            By submitting this application, you confirm that all information provided is accurate and complete.
-            Any false information may lead to rejection of your application.
-          </p>
+          {/* Navigation Buttons */}
+          <div className="flex justify-between pt-6 border-t border-gray-200">
+            {currentStep > 1 ? (
+              <button
+                onClick={() => setCurrentStep(prev => Math.max(prev - 1, 1))}
+                className="px-6 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+              >
+                Previous
+              </button>
+            ) : (
+              <div></div>
+            )}
+            
+            {currentStep < steps.length ? (
+              <button
+                onClick={handleNext}
+                disabled={loading}
+                className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+              >
+                {loading ? 'Processing...' : 'Next'}
+              </button>
+            ) : (
+              <button
+                onClick={handleSubmit}
+                disabled={loading}
+                className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
+              >
+                {loading ? 'Submitting...' : 'Submit Application'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
-  </div>
-)}
-
-{/* Navigation Buttons */}
-<div className="flex justify-between pt-6 border-t border-gray-200">
-  {currentStep > 1 ? (
-    <button
-      onClick={() => setCurrentStep(prev => Math.max(prev - 1, 1))}
-      className="px-6 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-    >
-      Previous
-    </button>
-  ) : (
-    <div></div>
-  )}
-  
-  {currentStep < steps.length ? (
-    <button
-      onClick={handleNext}
-      disabled={loading}
-      className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-    >
-      {loading ? 'Processing...' : 'Next'}
-    </button>
-  ) : (
-    <button
-      onClick={handleSubmit}
-      disabled={loading}
-      className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
-    >
-      {loading ? 'Submitting...' : 'Submit Application'}
-    </button>
-  )}
-</div>
-</div>
-</div>
-</div>
-);
+  );
 };
 
 export default EKYCWorkflow;

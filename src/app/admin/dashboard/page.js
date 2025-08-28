@@ -9,11 +9,10 @@ const AdminDashboard = () => {
 
     return (
         // <ProtectedRoute requiredRole="admin">
-        <Link href={'/admin/lead/add'}>
+        
             <div >
                 <AdminDashboardMain/>
             </div>
-            </Link>
         // </ProtectedRoute>
     );
 };
